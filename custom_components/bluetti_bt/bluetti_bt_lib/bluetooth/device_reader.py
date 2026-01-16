@@ -279,6 +279,79 @@ class DeviceReader:
 
             return parsed_data
 
+    async def write_command(self, command: WriteSingleRegister) -> bool:
+        """Write a command to the device. Returns True if successful."""
+        _LOGGER.info("Writing command: %s", command)
+        
+        async with self.polling_lock:
+            try:
+                async with async_timeout.timeout(self.polling_timeout):
+                    # Reconnect if not connected
+                    if not self.client.is_connected:
+                        ble_device_obj = self.ble_device
+                        if ble_device_obj is None and self.device_address:
+                            try:
+                                ble_device_obj = await BleakScanner.find_device_by_address(self.device_address)
+                            except Exception as e:
+                                _LOGGER.debug("BleakScanner failed: %s", e)
+                        
+                        if ble_device_obj is None:
+                            _LOGGER.error("No BLEDevice available for write command")
+                            return False
+                        
+                        self.client = await establish_connection(
+                            BleakClientWithServiceCache,
+                            ble_device_obj,
+                            "DeviceReader",
+                        )
+                        self.has_notifier = False
+                        if self.encrypted and self.encryption is not None:
+                            self.encryption.reset()
+                    
+                    # Attach notifier if needed
+                    if not self.has_notifier:
+                        await self.client.start_notify(NOTIFY_UUID, self._notification_handler)
+                        self.has_notifier = True
+                    
+                    # Wait for encryption handshake if needed
+                    if self.encrypted and self.encryption is not None:
+                        wait_attempts = 0
+                        max_attempts = 40  # 10 seconds
+                        while not self.encryption.is_ready_for_commands and wait_attempts < max_attempts:
+                            await asyncio.sleep(0.25)
+                            wait_attempts += 1
+                        if not self.encryption.is_ready_for_commands:
+                            _LOGGER.warning("Encryption handshake incomplete for write command")
+                            return False
+                    
+                    # Send the write command
+                    response = await self._async_send_command(command)
+                    _LOGGER.info("Write command response: %s", response.hex() if response else "empty")
+                    
+                    # Wait for device to process the command
+                    await asyncio.sleep(2)
+                    
+                    return len(response) > 0
+                    
+            except TimeoutError:
+                _LOGGER.error("Write command timed out")
+                return False
+            except BleakError as err:
+                _LOGGER.error("BLE error during write: %s", err)
+                return False
+            except Exception as err:
+                _LOGGER.error("Unexpected error during write: %s", err)
+                return False
+            finally:
+                if not self.persistent_conn:
+                    if self.has_notifier:
+                        try:
+                            await self.client.stop_notify(NOTIFY_UUID)
+                        except Exception:
+                            pass
+                        self.has_notifier = False
+                    await self.client.disconnect()
+
     async def _async_send_command(self, command: Union[ReadHoldingRegisters, WriteSingleRegister]) -> bytes:
         """Send command and return response"""
         try:

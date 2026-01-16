@@ -93,8 +93,6 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
 
         self._bluetti_device = bluetti_device
         self._coordinator = coordinator
-        self._client = coordinator.reader.client
-        self._polling_lock = coordinator.reader.polling_lock
         e_name = f"{device_info.get('name')} {name}"
         self._address = address
         self._response_key = response_key
@@ -167,48 +165,15 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.error("Field %s is not writable on device %s (not in writable_ranges)", self._response_key, mac_loggable(self._address))
             return None
 
-        async with self._polling_lock:
-            try:
-                async with async_timeout.timeout(15):
-                    if not self._client.is_connected:
-                        await self._client.connect()
-
-                    # Prepare command bytes
-                    command_bytes = bytes(command)
-                    
-                    # Encrypt if encryption is enabled
-                    reader = self._coordinator.reader
-                    if reader.encrypted and reader.encryption is not None and reader.encryption.is_ready_for_commands:
-                        key, iv = reader.encryption.getKeyIv()
-                        command_bytes = reader.encryption.aes_encrypt(command_bytes, key, iv)
-                        _LOGGER.debug("Sending encrypted command for %s (%d bytes)", self._response_key, len(command_bytes))
-                    else:
-                        _LOGGER.debug("Sending plain command for %s", self._response_key)
-
-                    # Send command
-                    _LOGGER.debug("Requesting %s (%s,%s)", command, self._response_key, state)
-                    await self._client.write_gatt_char(
-                        WRITE_UUID, command_bytes
-                    )
-
-                    # Wait until device has changed value, otherwise reading register might reset it
-                    await asyncio.sleep(5)
-
-            except TimeoutError:
-                _LOGGER.error("Timed out for device %s", mac_loggable(self._address))
-                return None
-            except BleakError as err:
-                _LOGGER.error("Bleak error: %s", err)
-                return None
-            except StopIteration:
-                _LOGGER.error("Field %s is not writable on device %s", self._response_key, mac_loggable(self._address))
-                return None
-            except Exception as err:
-                _LOGGER.error("Unexpected error writing to device %s: %s", mac_loggable(self._address), err)
-                return None
-            finally:
-                # Disconnect if connection not persistant
-                if not self._coordinator.reader.persistent_conn:
-                    await self._client.disconnect()
-
+        reader = self._coordinator.reader
+        
+        # Use the reader's write_command method which handles encryption properly
+        success = await reader.write_command(command)
+        
+        if success:
+            _LOGGER.info("Successfully wrote %s=%s to device %s", self._response_key, state, mac_loggable(self._address))
+        else:
+            _LOGGER.error("Failed to write %s=%s to device %s", self._response_key, state, mac_loggable(self._address))
+        
+        # Request a refresh to update the state
         await self.coordinator.async_request_refresh()
