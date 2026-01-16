@@ -161,7 +161,11 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
 
     async def write_to_device(self, state: bool):
         """Write to device."""
-        command = self._bluetti_device.build_setter_command(self._response_key, state)
+        try:
+            command = self._bluetti_device.build_setter_command(self._response_key, state)
+        except StopIteration:
+            _LOGGER.error("Field %s is not writable on device %s (not in writable_ranges)", self._response_key, mac_loggable(self._address))
+            return None
 
         async with self._polling_lock:
             try:
@@ -169,10 +173,22 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
                     if not self._client.is_connected:
                         await self._client.connect()
 
+                    # Prepare command bytes
+                    command_bytes = bytes(command)
+                    
+                    # Encrypt if encryption is enabled
+                    reader = self._coordinator.reader
+                    if reader.encrypted and reader.encryption is not None and reader.encryption.is_ready_for_commands:
+                        key, iv = reader.encryption.getKeyIv()
+                        command_bytes = reader.encryption.aes_encrypt(command_bytes, key, iv)
+                        _LOGGER.debug("Sending encrypted command for %s (%d bytes)", self._response_key, len(command_bytes))
+                    else:
+                        _LOGGER.debug("Sending plain command for %s", self._response_key)
+
                     # Send command
                     _LOGGER.debug("Requesting %s (%s,%s)", command, self._response_key, state)
                     await self._client.write_gatt_char(
-                        WRITE_UUID, bytes(command)
+                        WRITE_UUID, command_bytes
                     )
 
                     # Wait until device has changed value, otherwise reading register might reset it
@@ -183,6 +199,12 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
                 return None
             except BleakError as err:
                 _LOGGER.error("Bleak error: %s", err)
+                return None
+            except StopIteration:
+                _LOGGER.error("Field %s is not writable on device %s", self._response_key, mac_loggable(self._address))
+                return None
+            except Exception as err:
+                _LOGGER.error("Unexpected error writing to device %s: %s", mac_loggable(self._address), err)
                 return None
             finally:
                 # Disconnect if connection not persistant

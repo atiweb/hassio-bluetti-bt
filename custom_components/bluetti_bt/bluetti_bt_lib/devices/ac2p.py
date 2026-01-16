@@ -45,5 +45,8 @@ class AC2P(ProtocolV2Device):
 
     @property
     def writable_ranges(self) -> List[range]:
-        # Define if/where you want to support writing later (e.g. to toggle AC/DC outputs)
-        return super().writable_ranges
+        # Define writable ranges for AC2P controls
+        # power_lifting_on is at register 2021
+        return [
+            range(2021, 2022),  # power_lifting_on
+        ]
