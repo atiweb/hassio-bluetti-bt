@@ -122,6 +122,22 @@ class DeviceReader:
                         )
                         # Force notifier to be re-attached on the new client
                         self.has_notifier = False
+                        # Reset encryption state for new connection
+                        if self.encrypted and self.encryption is not None:
+                            self.encryption.reset()
+                            _LOGGER.debug("Reset encryption state for new connection")
+
+                    # Verify WRITE characteristic is available
+                    try:
+                        services = self.client.services
+                        write_char = services.get_characteristic(WRITE_UUID)
+                        if write_char is None:
+                            _LOGGER.error("WRITE characteristic %s not found in device services!", WRITE_UUID)
+                            _LOGGER.debug("Available services: %s", [str(s) for s in services])
+                            return None
+                        _LOGGER.debug("WRITE characteristic verified: %s", WRITE_UUID)
+                    except Exception as e:
+                        _LOGGER.warning("Could not verify WRITE characteristic: %s", e)
 
                     # Attach notifier if needed
                     if not self.has_notifier:
@@ -130,9 +146,11 @@ class DeviceReader:
                             NOTIFY_UUID, self._notification_handler
                         )
                         self.has_notifier = True
+                        _LOGGER.info("Notifier started, waiting for device messages...")
 
                     # Wait for encryption handshake to complete if needed
                     if self.encrypted and self.encryption is not None:
+                        _LOGGER.info("Waiting for encryption handshake (encrypted=%s)...", self.encrypted)
                         # Handshake completes asynchronously via notifications
                         # Give it some time (non-blocking small sleeps)
                         wait_attempts = 0
@@ -306,6 +324,29 @@ class DeviceReader:
         _LOGGER.debug("Returning empty response for %s", command)
         return bytes()
 
+    async def _write_with_retry(self, data: bytes, description: str = ""):
+        """Write data to the device with retry logic for encryption handshake."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Check if client is connected
+                if not self.client.is_connected:
+                    _LOGGER.warning("Client not connected for %s write, reconnecting...", description)
+                    return False
+                
+                # Try to write
+                await self.client.write_gatt_char(WRITE_UUID, data)
+                _LOGGER.debug("Successfully wrote %s (%d bytes)", description, len(data))
+                return True
+            except BleakError as e:
+                _LOGGER.warning("Write failed for %s (attempt %d/%d): %s", description, attempt + 1, max_retries, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                _LOGGER.error("Unexpected error writing %s: %s", description, e)
+                return False
+        return False
+
     def _notification_handler(self, _sender: int, data: bytearray):
         """Handle bt data."""
 
@@ -320,12 +361,13 @@ class DeviceReader:
                     # Pre key-exchange messages pass through special states
                     msg_obj.verify_checksum()
                     if msg_obj.type == MessageType.CHALLENGE:
+                        _LOGGER.info("Received encryption CHALLENGE, sending response...")
                         challenge_response = self.encryption.msg_challenge(msg_obj)
                         if challenge_response:
-                            asyncio.create_task(self.client.write_gatt_char(WRITE_UUID, challenge_response))
+                            asyncio.create_task(self._write_with_retry(challenge_response, "challenge_response"))
                         return
                     if msg_obj.type == MessageType.CHALLENGE_ACCEPTED:
-                        _LOGGER.debug("Challenge accepted")
+                        _LOGGER.info("Challenge ACCEPTED by device")
                         return
 
                 # Determine which key/iv we should use
@@ -339,11 +381,13 @@ class DeviceReader:
                 if decrypted.is_pre_key_exchange:
                     decrypted.verify_checksum()
                     if decrypted.type == MessageType.PEER_PUBKEY:
+                        _LOGGER.info("Received PEER_PUBKEY, sending our public key...")
                         peer_pubkey_response = self.encryption.msg_peer_pubkey(decrypted)
                         if peer_pubkey_response:
-                            asyncio.create_task(self.client.write_gatt_char(WRITE_UUID, peer_pubkey_response))
+                            asyncio.create_task(self._write_with_retry(peer_pubkey_response, "peer_pubkey_response"))
                         return
                     if decrypted.type == MessageType.PUBKEY_ACCEPTED:
+                        _LOGGER.info("Public key ACCEPTED - encryption handshake COMPLETE!")
                         self.encryption.msg_key_accepted(decrypted)
                         return
 
