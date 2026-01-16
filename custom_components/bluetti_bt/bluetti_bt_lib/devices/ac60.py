@@ -1,18 +1,8 @@
-from ..base_devices import BaseDeviceV2
-from ..fields import FieldName, UIntField, SwitchField
+"""AC60 fields."""
+
+from ..base_devices.ProtocolV2Device import ProtocolV2Device
 
 
-class AC60(BaseDeviceV2):
-    def __init__(self):
-        super().__init__(
-            [
-                UIntField(FieldName.DC_OUTPUT_POWER, 140),
-                UIntField(FieldName.AC_OUTPUT_POWER, 142),
-                UIntField(FieldName.DC_INPUT_POWER, 144),
-                UIntField(FieldName.AC_INPUT_POWER, 146),
-                UIntField(FieldName.AC_INPUT_VOLTAGE, 1314),
-                SwitchField(FieldName.CTRL_AC, 2011),
-                SwitchField(FieldName.CTRL_DC, 2012),
-                SwitchField(FieldName.CTRL_POWER_LIFTING, 2021),
-            ],
-        )
+class AC60(ProtocolV2Device):
+    def __init__(self, address: str, sn: str):
+        super().__init__(address, "AC60", sn)

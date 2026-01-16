@@ -1,30 +1,33 @@
 """Bluetti Bluetooth Integration"""
 
 from __future__ import annotations
-import asyncio
+
 import re
 import logging
 from typing import List
+
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import CONF_ADDRESS, CONF_TYPE, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
+    CONF_MAX_RETRIES,
+    CONF_PERSISTENT_CONN,
+    CONF_POLLING_INTERVAL,
+    CONF_POLLING_TIMEOUT,
+    CONF_USE_CONTROLS,
+    CONF_ENCRYPTION,
     DATA_COORDINATOR,
-    DATA_LOCK,
+    DATA_POLLING_RUNNING,
     DOMAIN,
     MANUFACTURER,
 )
-from .types import FullDeviceConfig
 from .coordinator import PollingCoordinator
 
-PLATFORMS: List[Platform] = [
-    Platform.BINARY_SENSOR,
-    Platform.SENSOR,
-]
+PLATFORMS: List[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -33,37 +36,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug("Init Bluetti BT Integration")
 
-    config = FullDeviceConfig.from_dict(entry.data)
+    address = entry.data.get(CONF_ADDRESS)
+    device_name = entry.data.get(CONF_NAME)
+    use_controls = entry.data.get(CONF_USE_CONTROLS)
+    polling_interval = entry.data.get(CONF_POLLING_INTERVAL, 60)
+    persistent_conn = entry.data.get(CONF_PERSISTENT_CONN, False)
+    polling_timeout = entry.data.get(CONF_POLLING_TIMEOUT, 120)
+    max_retries = entry.data.get(CONF_MAX_RETRIES, 5)
+    use_encryption = entry.data.get(CONF_ENCRYPTION, False)
 
-    if config is None:
+    if address is None:
         return False
 
-    if not bluetooth.async_address_present(hass, config.address):
+    if not bluetooth.async_address_present(hass, address):
         raise ConfigEntryNotReady("Bluetti device not present")
 
     # Create data structure
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
-
-    # Create lock
-    lock = asyncio.Lock()
+    hass.data[DOMAIN][entry.entry_id].setdefault(DATA_POLLING_RUNNING, False)
 
     # Create coordinator for polling
     _LOGGER.debug("Creating coordinator")
-    coordinator = PollingCoordinator(
-        hass,
-        config,
-        lock,
-    )
+    coordinator = PollingCoordinator(hass, address, device_name, polling_interval, persistent_conn, polling_timeout, max_retries, use_encryption)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id].setdefault(DATA_COORDINATOR, coordinator)
-    hass.data[DOMAIN][entry.entry_id].setdefault(DATA_LOCK, lock)
 
     _LOGGER.debug("Creating entities")
     platforms: list = PLATFORMS
-    if not config.use_encryption:
+    if use_controls is True:
+        _LOGGER.warning("You are using controls with this integration at your own risk!")
         platforms.append(Platform.SWITCH)
-        platforms.append(Platform.SELECT)
 
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
@@ -73,18 +76,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def device_info(entry: ConfigEntry):
+def device_info(entry: ConfigEntry) -> DeviceInfo:
     """Device info."""
-    config = FullDeviceConfig.from_dict(entry.data)
-
-    if config is None:
-        return None
-
     return DeviceInfo(
-        identifiers={(DOMAIN, config.address)},
+        identifiers={(DOMAIN, entry.data.get(CONF_ADDRESS))},
         name=entry.title,
         manufacturer=MANUFACTURER,
-        model=config.dev_type,
+        model=entry.data.get(CONF_TYPE),
     )
 
 

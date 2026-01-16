@@ -1,116 +1,112 @@
+"""Device recognizer."""
+
 import asyncio
 import logging
-from typing import Any, Callable, List
+from typing import Any, Callable
+from bleak import BleakClient
 
-from ..base_devices import BluettiDevice, BaseDeviceV1, BaseDeviceV2
-from ..bluetooth import DeviceReader, DeviceReaderConfig
-from ..devices import DEVICE_NAME_RE
-from ..fields import FieldName
+from ..utils.commands import ReadHoldingRegisters
+from ..base_devices.ProtocolV2Device import ProtocolV2Device
+from ..bluetooth.device_reader import DeviceReader
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class DeviceRecognizerResult:
-    def __init__(
-        self, name: str, iot_version: int, encrypted: bool, sn: int | None = None
-    ):
-        self.name = name
-        self.iot_version = iot_version
-        self.encrypted = encrypted
-        self.sn = sn
-        self.full_name = name + str(sn)
+async def discover_device_type(
+    bleak_client: BleakClient,
+    future_builder_method: Callable[[], asyncio.Future[Any]],
+    device_address: str | None = None,
+) -> str:
+
+    # Since we don't know the type we use the base device
+    bluetti_device = ProtocolV2Device("Unknown", "Unknown", "Unknown")
+
+    # Create device builder
+    device_reader = DeviceReader(
+        bleak_client, 
+        bluetti_device, 
+        future_builder_method,
+        device_address=device_address
+    )
+
+    # Initialize data to None
+    data = None
+    
+    # Retry a few times to get data
+    for _ in range(1, 50):
+        # We only need 6 registers to get the device type
+        data = await device_reader.read_data(
+            [
+                ReadHoldingRegisters(110, 6),
+            ]
+        )
+
+        if data is not None:
+            break
+
+        await asyncio.sleep(0.1)
+
+    if data is None:
+        # Should not happen
+        return "Unknown"
+
+    field_data = data.get("device_type")
+
+    if field_data is None:
+        # We have a problem
+        _LOGGER.error("No data in device type field_datas. Maybe it's a V1 device?")
+        return "Unknown"
+
+    if not isinstance(field_data, str):
+        # We have a problem
+        _LOGGER.error("Invalid data in device type field_datas")
+        return "Unknown"
+
+    return field_data
 
 
 async def recognize_device(
-    mac: str,
+    bleak_client: BleakClient,
     future_builder_method: Callable[[], asyncio.Future[Any]],
-) -> DeviceRecognizerResult | None:
+) -> str:
+
     # Since we don't know the type we use the base device
-    bluetti_devices: List[BluettiDevice] = [
-        BaseDeviceV2(),
-        BaseDeviceV1(),
-    ]
+    bluetti_device = ProtocolV2Device("Unknown", "Unknown", "Unknown")
 
-    for bluetti_device in bluetti_devices:
-        # Create device builder
-        device_readers = [
-            DeviceReader(
-                mac,
-                bluetti_device,
-                future_builder_method,
-                DeviceReaderConfig(
-                    timeout=15,
-                    use_encryption=True,
-                ),
-            ),
-            DeviceReader(
-                mac,
-                bluetti_device,
-                future_builder_method,
-                DeviceReaderConfig(timeout=8),
-            ),
-        ]
+    # Create device builder
+    device_reader = DeviceReader(bleak_client, bluetti_device, future_builder_method)
 
-        for device_reader in device_readers:
+    # Initialize data to None
+    data = None
+    
+    # Retry a few times to get data
+    for _ in range(1, 50):
+        # We only need 6 registers to get the device type
+        data = await device_reader.read_data(
+            [
+                ReadHoldingRegisters(110, 6),
+            ]
+        )
 
-            # We only need 6 registers to get the device type
-            data = await device_reader.read(
-                bluetti_device.get_device_type_registers(),
-            )
+        if data is not None:
+            break
 
-            if data is None:
-                continue
+        await asyncio.sleep(0.1)
 
-            type_data = data.get(FieldName.DEVICE_TYPE.value)
+    if data is None:
+        # Should not happen
+        return "Unknown"
 
-            if type_data is None:
-                # We have a problem
-                _LOGGER.error("No data in device type type_data")
-                continue
+    field_data = data.get("device_type")
 
-            if not isinstance(type_data, str):
-                # We have a problem
-                _LOGGER.error("Invalid data in device type type_data")
-                continue
+    if field_data is None:
+        # We have a problem
+        _LOGGER.error("No data in device type field_datas. Maybe it's a V1 device?")
+        return "Unknown"
 
-            if type_data == "":
-                # Empty string is not a valid device type
-                continue
+    if not isinstance(field_data, str):
+        # We have a problem
+        _LOGGER.error("Invalid data in device type field_datas")
+        return "Unknown"
 
-            if DEVICE_NAME_RE.match(type_data + "12345678") is None:
-                # Some V2 Devices populate the V1 register for type, so we need to check here
-                _LOGGER.warning("Device has populated type_data with trash data")
-                continue
-
-            data = await device_reader.read(
-                bluetti_device.get_device_sn_registers(),
-            )
-
-            if data is None:
-                # Should never happen
-                return DeviceRecognizerResult(
-                    type_data,
-                    bluetti_device.get_iot_version(),
-                    device_reader.config.use_encryption,
-                    "000000000000",  # Use dummy SN
-                )
-
-            sn_data = data.get(FieldName.DEVICE_SN.value)
-
-            if not isinstance(sn_data, int) or sn_data == "":
-                # Should never happen
-                return DeviceRecognizerResult(
-                    type_data,
-                    bluetti_device.get_iot_version(),
-                    device_reader.config.use_encryption,
-                    "000000000000",  # Use dummy SN
-                )
-
-            return DeviceRecognizerResult(
-                type_data,
-                bluetti_device.get_iot_version(),
-                device_reader.config.use_encryption,
-                sn_data,
-            )
-
-    return None
+    return field_data

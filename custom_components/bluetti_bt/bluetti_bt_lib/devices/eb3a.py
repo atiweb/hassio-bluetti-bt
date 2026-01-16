@@ -1,29 +1,36 @@
-from ..base_devices import BaseDeviceV1
-from ..fields import (
-    FieldName,
-    SwitchField,
-    SelectField,
-    VersionField,
-    DecimalField,
-)
-from ..enums import EcoMode, LedMode, ChargingMode
+"""EB3A fields."""
+
+from typing import List
+
+from ..utils.commands import ReadHoldingRegisters
+from ..field_enums import ChargingMode, EcoShutdown, LedMode
+from ..base_devices.ProtocolV1Device import ProtocolV1Device
 
 
-class EB3A(BaseDeviceV1):
-    def __init__(self):
-        super().__init__(
-            [
-                VersionField(FieldName.VER_ARM, 23),
-                VersionField(FieldName.VER_DSP, 25),
-                DecimalField(FieldName.AC_INPUT_VOLTAGE, 77, 1),
-                DecimalField(FieldName.DC_INPUT_VOLTAGE, 86, 2),
-                SwitchField(FieldName.CTRL_AC, 3007),
-                SwitchField(FieldName.CTRL_DC, 3008),
-                SelectField(FieldName.CTRL_LED_MODE, 3034, LedMode),
-                SwitchField(FieldName.CTRL_POWER_OFF, 3060),
-                SwitchField(FieldName.CTRL_ECO, 3063),
-                SelectField(FieldName.CTRL_ECO_TIME_MODE, 3064, EcoMode),
-                SelectField(FieldName.CTRL_CHARGING_MODE, 3065, ChargingMode),
-                SwitchField(FieldName.CTRL_POWER_LIFTING, 3066),
-            ],
-        )
+class EB3A(ProtocolV1Device):
+    def __init__(self, address: str, sn: str):
+        super().__init__(address, "EB3A", sn)
+
+        # Details
+        self.struct.add_decimal_field("ac_input_voltage", 77, 1)
+        self.struct.add_uint_field("internal_dc_input_voltage", 86)
+
+        # Controls
+        self.struct.add_enum_field("led_mode", 3034, LedMode)
+        self.struct.add_bool_field("power_off", 3060)
+        self.struct.add_bool_field("eco_on", 3063)
+        self.struct.add_enum_field("eco_shutdown", 3064, EcoShutdown)
+        self.struct.add_enum_field("charging_mode", 3065, ChargingMode)
+        self.struct.add_bool_field("power_lifting_on", 3066)
+
+    @property
+    def polling_commands(self) -> List[ReadHoldingRegisters]:
+        return self.struct.get_read_holding_registers()
+
+    @property
+    def writable_ranges(self) -> List[range]:
+        return super().writable_ranges + [
+            range(3034, 3035),
+            range(3060, 3061),
+            range(3063, 3067),
+        ]
