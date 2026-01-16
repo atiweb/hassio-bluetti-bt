@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
 
-from bluetti_bt_lib import build_device, BluettiDevice, DeviceWriter, DeviceField
+from .bluetti_bt_lib import build_device, BluettiDevice, DeviceWriter, DeviceField
 
 from .types import FullDeviceConfig
 from . import device_info as dev_info, get_unique_id

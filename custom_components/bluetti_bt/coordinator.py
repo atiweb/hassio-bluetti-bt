@@ -7,7 +7,7 @@ import logging
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from bluetti_bt_lib import build_device, DeviceReader, DeviceReaderConfig
+from .bluetti_bt_lib import build_device, DeviceReader, DeviceReaderConfig
 
 from .types import FullDeviceConfig
 
