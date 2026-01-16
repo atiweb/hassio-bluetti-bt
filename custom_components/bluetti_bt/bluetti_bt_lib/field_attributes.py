@@ -334,6 +334,14 @@ FIELD_ATTRIBUTES: dict[str, FieldAttributes] = {
         setter=True,
         name="Silent Charging",
     ),
+    # Temperature
+    "internal_temp": FieldAttributes(
+        type=FieldType.NUMERIC,
+        name="Internal Temperature",
+        unit_of_measurement="°C",
+        device_class="temperature",
+        state_class="measurement",
+    ),
 }
 
 
