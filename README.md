@@ -22,11 +22,15 @@ The original integration was refactored to use an external library (`bluetti-bt-
    - `116-119`: Serial Number
    - `140-147`: Power statistics (DC/AC output/input power)
    - `154`: Power Generation (kWh)
-   - `1509`: AC Output On (returns value 3 when on, not 1)
+   - `1500`: AC Output Frequency
+   - `1511-1512`: AC Output Voltage/Current
+   - `2011`: AC Output On (uses special boolean: 1=ON, 3=OFF)
    - `2012`: DC Output On
    - `2021`: Power Lifting On
 
-4. **BoolField Handling**: The AC2P returns `3` instead of `1` for boolean "on" states, requiring modification of the `BoolField` parser to use `value != 0` instead of `value == 1`.
+4. **Special Boolean Values**: The AC2P returns `1` for ON and `3` for OFF on the AC output register (2011), requiring a special `BoolFieldOnIsTrue` parser that only treats value `1` as True.
+
+5. **No Temperature Sensor**: The AC2P does not expose internal temperature via Bluetooth (only has a high-temp alert at >70°C, no continuous sensor).
 
 ### Solution
 
@@ -99,9 +103,22 @@ After adding the device:
 | DC Input Power | 144 | Solar/DC charging power (W) |
 | AC Input Power | 146 | AC charging power (W) |
 | Power Generation | 154 | Total energy generated (kWh) |
-| AC Output | 1509 | AC outlets on/off status |
+| AC Output Frequency | 1500 | AC output frequency (Hz) |
+| Internal AC Voltage | 1511 | AC output voltage (V) |
+| Internal Current | 1512 | AC output current (A) |
+| AC Output | 2011 | AC outlets on/off status |
 | DC Output | 2012 | USB/12V ports on/off status |
 | Power Lifting | 2021 | Power lifting mode status |
+
+> **Note**: AC2P does not expose internal temperature via Bluetooth.
+
+## AC2P Controls
+
+| Control | Register | Description |
+|---------|----------|-------------|
+| AC Output Switch | 2011 | Turn AC outlets on/off |
+| DC Output Switch | 2012 | Turn USB/12V ports on/off |
+| Power Lifting Switch | 2021 | Enable/disable power lifting mode |
 
 ## Troubleshooting
 
