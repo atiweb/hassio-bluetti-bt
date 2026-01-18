@@ -1,4 +1,4 @@
-﻿"""Bluetti Bluetooth Config Flow"""
+"""Bluetti Bluetooth Config Flow"""
 
 from __future__ import annotations
 
