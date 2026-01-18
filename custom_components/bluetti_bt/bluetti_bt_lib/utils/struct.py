@@ -72,6 +72,20 @@ class BoolField(DeviceField):
         return struct.unpack("!H", data)[0] != 0
 
 
+class BoolFieldOnIsTrue(DeviceField):
+    """Bool field where only value 1 means True, other values (like 3) mean False.
+    
+    Used for AC2P ac_output_on where:
+    - 0x0001 (1) = ON
+    - 0x0003 (3) = OFF
+    """
+    def __init__(self, name: str, address: int):
+        super().__init__(name, address, 1)
+
+    def parse(self, data: bytes) -> bool:
+        return struct.unpack("!H", data)[0] == 1
+
+
 class EnumField(DeviceField):
     def __init__(self, name: str, address: int, enum: Type[Enum]):
         self.enum = enum
@@ -158,6 +172,10 @@ class DeviceStruct:
 
     def add_bool_field(self, name: str, address: int):
         self.fields.append(BoolField(name, address))
+
+    def add_bool_field_on_is_true(self, name: str, address: int):
+        """Add bool field where only value 1 is True (for AC2P ac_output_on)."""
+        self.fields.append(BoolFieldOnIsTrue(name, address))
 
     def add_enum_field(self, name: str, address: int, enum: Type[Enum]):
         self.fields.append(EnumField(name, address, enum))

@@ -5,7 +5,7 @@
 from typing import Any, List
 
 from ..utils.commands import ReadHoldingRegisters, WriteSingleRegister
-from ..utils.struct import BoolField, DeviceStruct, EnumField
+from ..utils.struct import BoolField, BoolFieldOnIsTrue, DeviceStruct, EnumField
 
 
 class BluettiDevice:
@@ -64,6 +64,9 @@ class BluettiDevice:
         # Convert value to an integer
         if isinstance(device_field, EnumField):
             value = device_field.enum[value].value
+        elif isinstance(device_field, BoolFieldOnIsTrue):
+            # AC2P uses special values: 1=ON, 3=OFF
+            value = 1 if value else 3
         elif isinstance(device_field, BoolField):
             value = 1 if value else 0
 
